@@ -16,6 +16,8 @@ import 'models/event.dart';
 import 'models/result.dart';
 import 'models/retrieve_events_params.dart';
 
+import 'models/task.dart';
+
 /// Provides functionality for working with device calendar(s)
 class DeviceCalendarPlugin {
   static const MethodChannel channel =
@@ -151,6 +153,30 @@ class DeviceCalendarPlugin {
     );
   }
 
+  /// Deletes a task. An EKReminder on iOS.
+  ///
+  /// The `taskId` parameter is the id of the task that plugin will try to delete
+  ///
+  /// Returns a [Result] indicating if the task has (true) or has not (false) been deleted
+  Future<Result<bool>> deleteTask(
+    String? taskId,
+  ) async {
+    return _invokeChannelMethod(
+      ChannelConstants.methodNameDeleteTask,
+      assertParameters: (result) {
+        _assertParameter(
+          result,
+          taskId?.isNotEmpty ?? false,
+          ErrorCodes.invalidArguments,
+          ErrorMessages.deleteTaskInvalidArgumentsMessage,
+        );
+      },
+      arguments: () => <String, Object?>{
+        ChannelConstants.parameterNameTaskId: taskId,
+      },
+    );
+  }
+
   /// Deletes an instance of a recurring event from a calendar. This should be used for a recurring event only.\
   /// If `startDate`, `endDate` or `deleteFollowingInstances` is not valid or null, then all instances of the event will be deleted.
   ///
@@ -259,6 +285,21 @@ class DeviceCalendarPlugin {
     );
   }
 
+  /// Creates or updates a task
+  ///
+  /// The `task` paramter specifies how task data should be saved into the calendar
+  /// Always specify the [Event.calendarId], to inform the plugin in which calendar
+  /// it should create or update the task.
+  ///
+  /// Returns a [Result] with the newly created or updated [Task.taskId]
+  Future<Result<String>?> createOrUpdateTask(Task? task) async {
+    if (task == null) return null;
+    return _invokeChannelMethod(
+      ChannelConstants.methodNameCreateOrUpdateTask,
+      arguments: () => task.toJson(),
+    );
+  }
+
   /// Creates a new local calendar for the current device.
   ///
   /// The `calendarName` parameter is the name of the new calendar\
@@ -322,7 +363,7 @@ class DeviceCalendarPlugin {
 
   /// Displays a native iOS view [EKEventViewController]
   /// https://developer.apple.com/documentation/eventkitui/ekeventviewcontroller
-  /// 
+  ///
   /// Allows to change the event's attendance status
   /// Works only on iOS
   /// Returns after dismissing EKEventViewController's dialog
@@ -364,8 +405,13 @@ class DeviceCalendarPlugin {
       } else {
         result.data = rawData;
       }
-    } catch (e) {
-      _parsePlatformExceptionAndUpdateResult<T>(e as Exception?, result);
+    } catch (e, stacktrace) {
+      if (e is Exception?) {
+        _parsePlatformExceptionAndUpdateResult<T>(e as Exception?, result);
+      } else {
+        print(e);
+        print(stacktrace);
+      }
     }
 
     return result;

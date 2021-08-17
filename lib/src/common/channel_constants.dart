@@ -5,9 +5,12 @@ class ChannelConstants {
   static const String methodNameHasPermissions = 'hasPermissions';
   static const String methodNameRetrieveCalendars = 'retrieveCalendars';
   static const String methodNameRetrieveEvents = 'retrieveEvents';
+  static const String methodNameRetrieveTasks = 'retrieveTasks';
   static const String methodNameDeleteEvent = 'deleteEvent';
   static const String methodNameDeleteEventInstance = 'deleteEventInstance';
+  static const String methodNameDeleteTask = 'deleteTask';
   static const String methodNameCreateOrUpdateEvent = 'createOrUpdateEvent';
+  static const String methodNameCreateOrUpdateTask = 'createOrUpdateTask';
   static const String methodNameCreateCalendar = 'createCalendar';
   static const String methodNameDeleteCalendar = 'deleteCalendar';
   static const String methodNameShowiOSEventModal = 'showiOSEventModal';
@@ -16,6 +19,7 @@ class ChannelConstants {
   static const String parameterNameStartDate = 'startDate';
   static const String parameterNameEndDate = 'endDate';
   static const String parameterNameEventId = 'eventId';
+  static const String parameterNameTaskId = 'taskId';
   static const String parameterNameEventIds = 'eventIds';
   static const String parameterNameEventStartDate = 'eventStartDate';
   static const String parameterNameEventEndDate = 'eventEndDate';

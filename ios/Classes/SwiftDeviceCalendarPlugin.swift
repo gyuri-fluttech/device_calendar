@@ -43,6 +43,17 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
         let availability: Availability?
     }
     
+    struct Task: Codable {
+        let taskId: String
+        let title: String!
+        let notes: String?
+        let priority: Int
+        let startDate: Int64
+        let dueDate: Int64
+        let completed: Bool
+        let timezone: String?
+    }
+
     struct RecurrenceRule: Codable {
         let recurrenceFrequency: Int
         let totalOccurrences: Int?
@@ -80,6 +91,7 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
     let unauthorizedErrorCode = "401"
     let unauthorizedErrorMessage = "The user has not allowed this application to modify their calendar(s)"
     let calendarNotFoundErrorMessageFormat = "The calendar with the ID %@ could not be found"
+    let taskNotFoundErrorMessageFormat = "The task with the ID %@ could not be found"
     let calendarReadOnlyErrorMessageFormat = "Calendar with ID %@ is read-only"
     let eventNotFoundErrorMessageFormat = "The event with the ID %@ could not be found"
     let eventStore = EKEventStore()
@@ -87,13 +99,16 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
     let hasPermissionsMethod = "hasPermissions"
     let retrieveCalendarsMethod = "retrieveCalendars"
     let retrieveEventsMethod = "retrieveEvents"
+    let retrieveTasksMethod = "retrieveTasks"
     let retrieveSourcesMethod = "retrieveSources"
     let createOrUpdateEventMethod = "createOrUpdateEvent"
+    let createOrUpdateTaskMethod = "createOrUpdateTask"
     let createCalendarMethod = "createCalendar"
     let deleteCalendarMethod = "deleteCalendar"
     let deleteEventMethod = "deleteEvent"
     let deleteEventInstanceMethod = "deleteEventInstance"
     let showEventModalMethod = "showiOSEventModal"
+    let deleteTaskMethod = "deleteTask"
     let calendarIdArgument = "calendarId"
     let startDateArgument = "startDate"
     let endDateArgument = "endDate"
@@ -107,6 +122,15 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
     let eventStartTimeZoneArgument = "eventStartTimeZone"
     let eventLocationArgument = "eventLocation"
     let eventURLArgument = "eventURL"
+    let taskIdArgument = "taskId"
+    let taskTitleArgument = "taskTitle"
+    let taskNotesArgument = "taskNotes"
+    let taskPriorityArgument = "taskPriority"
+    let taskStartDateArgument = "taskStartDate"
+    let taskDueDateArgument = "taskDueDate"
+    let taskCompletedArgument = "taskCompleted"
+    let taskTimezoneArgument = "taskTimezone"
+
     let attendeesArgument = "attendees"
     let recurrenceRuleArgument = "recurrenceRule"
     let recurrenceFrequencyArgument = "recurrenceFrequency"
@@ -159,6 +183,13 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
         case showEventModalMethod:
             self.flutterResult = result
             showEventModal(call, result)
+        case retrieveTasksMethod:
+            retrieveTasks(call, result)
+        case createOrUpdateTaskMethod:
+            createOrUpdateTask(call, result)
+        case deleteTaskMethod:
+            deleteTask(call, result)
+
         default:
             result(FlutterMethodNotImplemented)
         }
@@ -358,7 +389,7 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
                 reminders.append(Reminder(minutes: Int(-alarm.relativeOffset / 60)))
             }
         }
-        
+
         let recurrenceRule = parseEKRecurrenceRules(ekEvent)
         let event = Event(
             eventId: ekEvent.eventIdentifier,
@@ -381,6 +412,21 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
         return event
     }
     
+    private func createTaskFromEkReminder(calendarId: String, ekReminder: EKReminder) -> Task {
+        let task = Task(
+            taskId: ekReminder.calendarItemIdentifier,
+            title: ekReminder.title,
+            notes: ekReminder.notes,
+            priority: ekReminder.priority,
+            startDate: Int64(ekReminder.startDateComponents?.date?.millisecondsSinceEpoch ?? 0),
+            dueDate: Int64(ekReminder.dueDateComponents?.date?.millisecondsSinceEpoch ?? 0),
+            completed: ekReminder.isCompleted,
+            timezone: ekReminder.timeZone?.identifier
+        )
+
+        return task
+    }
+
     private func convertEkParticipantToAttendee(ekParticipant: EKParticipant?) -> Attendee? {
         if ekParticipant == nil || ekParticipant?.emailAddress == nil {
             return nil
@@ -393,7 +439,7 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
             attendanceStatus: ekParticipant!.participantStatus.rawValue,
             isCurrentUser: ekParticipant!.isCurrentUser
         )
-        
+
         return attendee
     }
     
@@ -792,38 +838,155 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
         }, result: result)
     }
 
+    private func retrieveTasks(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+        checkPermissionsThenExecute(permissionsGrantedAction: {
+            let arguments = call.arguments as! Dictionary<String, AnyObject>
+            let calendarId = arguments[calendarIdArgument] as! String
+            let startDateMillisecondsSinceEpoch = arguments[startDateArgument] as? NSNumber
+            let endDateDateMillisecondsSinceEpoch = arguments[endDateArgument] as? NSNumber
+            var tasks = [Task]()
+            let specifiedStartEndDates = startDateMillisecondsSinceEpoch != nil && endDateDateMillisecondsSinceEpoch != nil
+            if specifiedStartEndDates {
+                let startDate = Date (timeIntervalSince1970: startDateMillisecondsSinceEpoch!.doubleValue / 1000.0)
+                let endDate = Date (timeIntervalSince1970: endDateDateMillisecondsSinceEpoch!.doubleValue / 1000.0)
+                let ekCalendar = self.eventStore.calendar(withIdentifier: calendarId)
+                let predicate = self.eventStore.predicateForIncompleteReminders(withDueDateStarting: startDate, ending: endDate, calendars: [ekCalendar!])
+
+
+
+                self.eventStore.fetchReminders(matching: predicate, completion: {(_ reminders: [Any]?) -> Void in
+                    for reminder: EKReminder? in reminders as? [EKReminder?] ?? [EKReminder?]() {
+                        let task = self.createTaskFromEkReminder(calendarId: calendarId, ekReminder: reminder!)
+                        tasks.append(task)
+                    }
+                })
+            }
+
+            self.encodeJsonAndFinish(codable: tasks, result: result)
+        }, result: result)
+    }
+
+    private func createOrUpdateTask(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+        checkPermissionsThenExecute(permissionsGrantedAction: {
+            let arguments = call.arguments as! Dictionary<String, AnyObject>
+            let taskId = arguments[taskIdArgument] as? String
+            let startDateMillisecondsSinceEpoch = arguments[taskStartDateArgument] as? NSNumber
+            let dueDateDateMillisecondsSinceEpoch = arguments[taskDueDateArgument] as? NSNumber
+            let startDate = startDateMillisecondsSinceEpoch != nil ? Date (timeIntervalSince1970:           startDateMillisecondsSinceEpoch!.doubleValue / 1000.0): nil
+
+            let dueDate = dueDateDateMillisecondsSinceEpoch != nil ? Date (timeIntervalSince1970: dueDateDateMillisecondsSinceEpoch!.doubleValue / 1000.0) : nil
+
+            let title = arguments[self.taskTitleArgument] as! String
+            let notes = arguments[self.taskNotesArgument] as? String
+            let priority = arguments[self.taskPriorityArgument] as! Int
+            let completed = arguments[self.taskCompletedArgument] as! Bool
+            let timezone = arguments[self.taskTimezoneArgument] as? String
+
+
+            let ekCalendar = self.eventStore.defaultCalendarForNewReminders()
+            if (ekCalendar == nil) {
+                self.finishWithCalendarNotFoundError(result: result, calendarId: "Default")
+                return
+            }
+
+            var ekReminder: EKReminder?
+            if taskId == nil {
+                ekReminder = EKReminder.init(eventStore: self.eventStore)
+            } else {
+                ekReminder = self.eventStore.calendarItem(withIdentifier: taskId!) as? EKReminder
+                if(ekReminder == nil) {
+                    self.finishWithEventNotFoundError(result: result, eventId: taskId!)
+                    return
+                }
+            }
+
+            let calendar = NSCalendar.current
+            let timezoneObject: TimeZone
+            if (timezone != nil) {
+                timezoneObject = TimeZone(identifier: timezone!)!
+            } else {
+                timezoneObject = .current
+            }
+
+
+            ekReminder!.title = title
+            ekReminder!.notes = notes
+            if (startDate != nil) {
+              ekReminder!.startDateComponents = calendar.dateComponents(in: timezoneObject, from: startDate!)
+            }
+            if (dueDate != nil) {
+                ekReminder!.dueDateComponents = calendar.dateComponents(in: timezoneObject, from: dueDate!)
+            }
+
+            ekReminder!.priority = priority
+            ekReminder!.isCompleted = completed
+            ekReminder!.timeZone = timezoneObject
+            ekReminder!.calendar = ekCalendar!
+
+            do {
+                try self.eventStore.save(ekReminder!, commit: true)
+
+                result(ekReminder!.calendarItemIdentifier)
+            } catch {
+                self.eventStore.reset()
+                result(FlutterError(code: self.genericError, message: error.localizedDescription, details: nil))
+            }
+        }, result: result)
+    }
+
+    private func deleteTask(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+        checkPermissionsThenExecute(permissionsGrantedAction: {
+            let arguments = call.arguments as! Dictionary<String, AnyObject>
+            let taskId = arguments[taskIdArgument] as! String
+
+            let ekReminder = self.eventStore.calendarItem(withIdentifier: taskId) as? EKReminder
+            if ekReminder == nil {
+                self.finishWithTaskNotFoundError(result: result, taskId: taskId)
+                return
+            }
+
+            do {
+                try self.eventStore.remove(ekReminder!, commit: true)
+                result(true)
+            } catch {
+                self.eventStore.reset()
+                result(FlutterError(code: self.genericError, message: error.localizedDescription, details: nil))
+            }
+        }, result: result)
+    }
+
        private func showEventModal(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
         checkPermissionsThenExecute(permissionsGrantedAction: {
             let arguments = call.arguments as! Dictionary<String, AnyObject>
             let eventId = arguments[eventIdArgument] as! String
             let event = self.eventStore.event(withIdentifier: eventId)
-            
+
             if event != nil {
                 let eventController = EKEventViewController()
                 eventController.event = event!
                 eventController.delegate = self
                 eventController.allowsEditing = true
                 eventController.allowsCalendarPreview = true
-                
+
                 let flutterViewController = getTopMostViewController()
                 let navigationController = UINavigationController(rootViewController: eventController)
-                
+
                 navigationController.toolbar.isTranslucent = false
                 navigationController.toolbar.tintColor = .blue
                 navigationController.toolbar.backgroundColor = .white
 
                 flutterViewController.present(navigationController, animated: true, completion: nil)
-                
-               
+
+
             } else {
                 result(FlutterError(code: self.genericError, message: self.eventNotFoundErrorMessageFormat, details: nil))
             }
         }, result: result)
     }
-    
+
     public func eventViewController(_ controller: EKEventViewController, didCompleteWith action: EKEventViewAction) {
         controller.dismiss(animated: true, completion: nil)
-        
+
         if flutterResult != nil {
             switch action {
             case .done:
@@ -837,16 +1000,16 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
             }
         }
     }
-    
+
     private func getTopMostViewController() -> UIViewController {
          var topController: UIViewController? = UIApplication.shared.keyWindow?.rootViewController
          while ((topController?.presentedViewController) != nil) {
            topController = topController?.presentedViewController
          }
-        
+
          return topController!
     }
-    
+
     private func finishWithUnauthorizedError(result: @escaping FlutterResult) {
         result(FlutterError(code:self.unauthorizedErrorCode, message: self.unauthorizedErrorMessage, details: nil))
     }
@@ -855,7 +1018,12 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
         let errorMessage = String(format: self.calendarNotFoundErrorMessageFormat, calendarId)
         result(FlutterError(code:self.notFoundErrorCode, message: errorMessage, details: nil))
     }
-    
+
+    private func finishWithTaskNotFoundError(result: @escaping FlutterResult, taskId: String) {
+        let errorMessage = String(format: self.taskNotFoundErrorMessageFormat, taskId)
+        result(FlutterError(code:self.notFoundErrorCode, message: errorMessage, details: nil))
+    }
+
     private func finishWithCalendarReadOnlyError(result: @escaping FlutterResult, calendarId: String) {
         let errorMessage = String(format: self.calendarReadOnlyErrorMessageFormat, calendarId)
         result(FlutterError(code:self.notAllowed, message: errorMessage, details: nil))
@@ -878,37 +1046,47 @@ public class SwiftDeviceCalendarPlugin: NSObject, FlutterPlugin, EKEventViewDele
     }
     
     private func checkPermissionsThenExecute(permissionsGrantedAction: () -> Void, result: @escaping FlutterResult) {
-        if hasEventPermissions() {
+        if (hasTaskPermissions()) {
             permissionsGrantedAction()
             return
         }
         self.finishWithUnauthorizedError(result: result)
     }
-    
-    private func requestPermissions(completion: @escaping (Bool) -> Void) {
-        if hasEventPermissions() {
-            completion(true)
-            return
-        }
-        eventStore.requestAccess(to: .event, completion: {
-            (accessGranted: Bool, _: Error?) in
-            completion(accessGranted)
-        })
-    }
-    
+
     private func hasEventPermissions() -> Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
         return status == EKAuthorizationStatus.authorized
     }
     
+    private func hasTaskPermissions() -> Bool {
+        let status = EKEventStore.authorizationStatus(for: .reminder)
+        return status == EKAuthorizationStatus.authorized
+    }
+
     private func requestPermissions(_ result: @escaping FlutterResult) {
-        if hasEventPermissions()  {
+        if (hasTaskPermissions())  {
             result(true)
         }
-        eventStore.requestAccess(to: .event, completion: {
+
+        self.eventStore.requestAccess(to: .reminder, completion: {
             (accessGranted: Bool, _: Error?) in
+
             result(accessGranted)
         })
+
+        // Event permission not needed yet
+//        eventStore.requestAccess(to: .event, completion: {
+//            (accessGranted: Bool, _: Error?) in
+//            if (accessGranted) {
+//                self.eventStore.requestAccess(to: .reminder, completion: {
+//                    (accessGranted: Bool, _: Error?) in
+//
+//                    result(accessGranted)
+//                })
+//            } else {
+//                result(accessGranted)
+//            }
+//        })
     }
 }
 
